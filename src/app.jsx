@@ -280,15 +280,17 @@ function classify(title) {
 }
 
 // ── Excel export ──────────────────────────────────────────────────────────────
-function exportExcel(rows, fname) {
+function exportExcel(rows, fname, isSingleCat) {
   const wb = XLSX.utils.book_new();
 
+  // Sheet 1 — Product rows
   const ws1 = XLSX.utils.json_to_sheet(rows.map(r => ({
     "Product Title": r.title, "Category": r.category, "Sub-Category": r.subcategory
   })));
   ws1["!cols"] = [{ wch: 60 }, { wch: 30 }, { wch: 30 }];
   XLSX.utils.book_append_sheet(wb, ws1, "Categorized Products");
 
+  // Sheet 2 — Sub-category summary
   const sumMap = {};
   rows.forEach(r => { const k = `${r.category}||${r.subcategory}`; sumMap[k] = (sumMap[k] || 0) + 1; });
   const ws2 = XLSX.utils.json_to_sheet(
@@ -298,13 +300,16 @@ function exportExcel(rows, fname) {
   ws2["!cols"] = [{ wch: 30 }, { wch: 30 }, { wch: 12 }];
   XLSX.utils.book_append_sheet(wb, ws2, "Summary");
 
-  const taxRows = [];
-  for (const [cat, subs] of Object.entries(TAXONOMY))
-    for (const [sub, kws] of Object.entries(subs))
-      taxRows.push({ Category: cat, "Sub-Category": sub, Keywords: kws.join(", ") });
-  const ws3 = XLSX.utils.json_to_sheet(taxRows);
-  ws3["!cols"] = [{ wch: 30 }, { wch: 30 }, { wch: 80 }];
-  XLSX.utils.book_append_sheet(wb, ws3, "Taxonomy & Keywords");
+  // Sheet 3 — Full taxonomy (only for complete download)
+  if (!isSingleCat) {
+    const taxRows = [];
+    for (const [cat, subs] of Object.entries(TAXONOMY))
+      for (const [sub, kws] of Object.entries(subs))
+        taxRows.push({ Category: cat, "Sub-Category": sub, Keywords: kws.join(", ") });
+    const ws3 = XLSX.utils.json_to_sheet(taxRows);
+    ws3["!cols"] = [{ wch: 30 }, { wch: 30 }, { wch: 80 }];
+    XLSX.utils.book_append_sheet(wb, ws3, "Taxonomy & Keywords");
+  }
 
   XLSX.writeFile(wb, fname);
 }
@@ -538,8 +543,9 @@ export default function App() {
           <div style={S.card}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
               <h2 style={{...S.h2,margin:0}}>✅ Categorization Complete!</h2>
-              <button onClick={doExport} style={{...S.btn("#16a34a"),display:"flex",alignItems:"center",gap:8}}>
-                📊 Download Excel
+              <button onClick={() => doExport(null)}
+                style={{...S.btn("#16a34a"),display:"flex",alignItems:"center",gap:8}}>
+                📊 Download All ({fmt(rows.length)} rows)
               </button>
             </div>
 
@@ -550,7 +556,9 @@ export default function App() {
               <div style={S.stat}><div style={{fontSize:11,color:"#475569",fontWeight:600}}>Uncategorized</div><div style={{fontSize:20,fontWeight:800,color:"#f87171"}}>{fmt((catSummary["Uncategorized"]||{total:0}).total)}</div><div style={{fontSize:11,color:"#374151"}}>{pct((catSummary["Uncategorized"]||{total:0}).total)}%</div></div>
             </div>
 
-            <div style={{fontSize:11,color:"#475569",fontWeight:700,textTransform:"uppercase",letterSpacing:1,marginBottom:10}}>Results by Category</div>
+            <div style={{fontSize:11,color:"#475569",fontWeight:700,textTransform:"uppercase",letterSpacing:1,marginBottom:10}}>
+              Results by Category — click any row to download that category
+            </div>
             <div style={{display:"flex",flexDirection:"column",gap:8,maxHeight:400,overflowY:"auto"}}>
               {sortedCats.map(([cat, data], i) => (
                 <div key={cat} style={{background:"#111f33",border:"1px solid #1e2d45",borderRadius:11,padding:"12px 14px"}}>
@@ -558,7 +566,13 @@ export default function App() {
                     <div style={{width:9,height:9,borderRadius:"50%",background:PAL[i%PAL.length],flexShrink:0}} />
                     <span style={{fontWeight:700,fontSize:13,color:"#e2e8f0",flex:1}}>{cat}</span>
                     <span style={{fontSize:12,color:"#60a5fa",fontWeight:700}}>{fmt(data.total)}</span>
-                    <span style={{fontSize:11,color:"#475569"}}>({pct(data.total)}%)</span>
+                    <span style={{fontSize:11,color:"#475569",marginRight:8}}>({pct(data.total)}%)</span>
+                    <button
+                      onClick={() => doExport(cat)}
+                      title={`Download ${cat}`}
+                      style={{background:"rgba(37,99,235,0.15)",border:"1px solid rgba(37,99,235,0.3)",color:"#60a5fa",borderRadius:7,padding:"4px 10px",fontSize:11,fontWeight:700,cursor:"pointer",flexShrink:0,whiteSpace:"nowrap"}}>
+                      ⬇️ {fmt(data.total)} rows
+                    </button>
                   </div>
                   <div style={{height:5,background:"#1e2d45",borderRadius:999,overflow:"hidden",marginBottom:8}}>
                     <div style={{width:`${pct(data.total)}%`,height:"100%",background:PAL[i%PAL.length]+"bb",borderRadius:999}} />
@@ -576,8 +590,12 @@ export default function App() {
 
             <div style={{marginTop:14,background:"rgba(22,163,74,0.07)",border:"1px solid rgba(22,163,74,0.2)",borderRadius:11,padding:"13px 16px",fontSize:12,color:"#4ade80",display:"flex",gap:10}}>
               <span style={{fontSize:18}}>📊</span>
-              <div><b>Excel: 3 sheets</b> — Categorized Products · Summary · Taxonomy &amp; Keywords
-                <div style={{color:"#16a34a",marginTop:3,fontSize:11}}>All {fmt(rows.length)} rows with Category + Sub-Category. Taxonomy sheet lists all keywords used.</div>
+              <div>
+                <b>Download options:</b>
+                <div style={{color:"#16a34a",marginTop:3,fontSize:11}}>
+                  • <b>Download All</b> (top right) — full {fmt(rows.length)} rows, 3 sheets: Categorized Products · Summary · Taxonomy<br/>
+                  • <b>⬇️ N rows</b> button on each category — only that category's rows, single sheet
+                </div>
               </div>
             </div>
           </div>
