@@ -280,34 +280,47 @@ function classify(title) {
 }
 
 // ── Excel export ──────────────────────────────────────────────────────────────
-function exportExcel(rows, fname, isSingleCat) {
+function exportExcel(rows, fname, categoryLabel) {
   const wb = XLSX.utils.book_new();
+  const isSingle = !!categoryLabel;
 
-  // Sheet 1 — Product rows
+  // Sheet 1 — Categorized rows (always includes Category + Sub-Category columns)
+  const sheetName = isSingle
+    ? categoryLabel.substring(0, 28)   // Excel sheet name max 31 chars
+    : "Categorized Products";
   const ws1 = XLSX.utils.json_to_sheet(rows.map(r => ({
-    "Product Title": r.title, "Category": r.category, "Sub-Category": r.subcategory
+    "Product Title":  r.title,
+    "Category":       r.category,
+    "Sub-Category":   r.subcategory
   })));
-  ws1["!cols"] = [{ wch: 60 }, { wch: 30 }, { wch: 30 }];
-  XLSX.utils.book_append_sheet(wb, ws1, "Categorized Products");
+  ws1["!cols"] = [{ wch: 60 }, { wch: 32 }, { wch: 32 }];
+  XLSX.utils.book_append_sheet(wb, ws1, sheetName);
 
-  // Sheet 2 — Sub-category summary
+  // Sheet 2 — Sub-category summary for these rows only
   const sumMap = {};
-  rows.forEach(r => { const k = `${r.category}||${r.subcategory}`; sumMap[k] = (sumMap[k] || 0) + 1; });
+  rows.forEach(r => {
+    const k = `${r.category}||${r.subcategory}`;
+    sumMap[k] = (sumMap[k] || 0) + 1;
+  });
   const ws2 = XLSX.utils.json_to_sheet(
-    Object.entries(sumMap).sort((a, b) => b[1] - a[1])
-      .map(([k, n]) => { const [cat, sub] = k.split("||"); return { Category: cat, "Sub-Category": sub, Count: n }; })
+    Object.entries(sumMap)
+      .sort((a, b) => b[1] - a[1])
+      .map(([k, n]) => {
+        const [cat, sub] = k.split("||");
+        return { "Category": cat, "Sub-Category": sub, "Count": n };
+      })
   );
-  ws2["!cols"] = [{ wch: 30 }, { wch: 30 }, { wch: 12 }];
+  ws2["!cols"] = [{ wch: 32 }, { wch: 32 }, { wch: 12 }];
   XLSX.utils.book_append_sheet(wb, ws2, "Summary");
 
-  // Sheet 3 — Full taxonomy (only for complete download)
-  if (!isSingleCat) {
+  // Sheet 3 — Taxonomy reference (full download only)
+  if (!isSingle) {
     const taxRows = [];
     for (const [cat, subs] of Object.entries(TAXONOMY))
       for (const [sub, kws] of Object.entries(subs))
-        taxRows.push({ Category: cat, "Sub-Category": sub, Keywords: kws.join(", ") });
+        taxRows.push({ "Category": cat, "Sub-Category": sub, "Keywords": kws.join(", ") });
     const ws3 = XLSX.utils.json_to_sheet(taxRows);
-    ws3["!cols"] = [{ wch: 30 }, { wch: 30 }, { wch: 80 }];
+    ws3["!cols"] = [{ wch: 32 }, { wch: 32 }, { wch: 80 }];
     XLSX.utils.book_append_sheet(wb, ws3, "Taxonomy & Keywords");
   }
 
