@@ -247,7 +247,7 @@ const TAXONOMY = {
 };
 
 // ── NLP ENGINE ────────────────────────────────────────────────────────────────
-let KW_INDEX = null; // reset whenever taxonomy changes
+let KW_INDEX = null; 
 
 function buildIndex() {
   if (KW_INDEX) return KW_INDEX;
@@ -255,7 +255,16 @@ function buildIndex() {
   for (const [cat, subs] of Object.entries(TAXONOMY)) {
     for (const [sub, kws] of Object.entries(subs)) {
       for (const kw of kws) {
-        idx.push({ kw: kw.toLowerCase(), cat, sub, w: kw.trim().split(/\s+/).length });
+        const cleanKw = kw.toLowerCase().trim();
+        // Tokenize without hyphens for the unordered backup check
+        const tokens = cleanKw.replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter(Boolean);
+        idx.push({ 
+          kw: cleanKw, 
+          tokens: tokens, 
+          cat, 
+          sub, 
+          w: tokens.length || 1 
+        });
       }
     }
   }
@@ -265,22 +274,50 @@ function buildIndex() {
 }
 
 function classify(title) {
-  const idx   = buildIndex();
-  const clean = title.toLowerCase().replace(/[^a-z0-9\s\-]/g, " ").replace(/\s+/g, " ").trim();
+  const idx = buildIndex();
+  
+  // Clean string for Layer 1: Exact Match (keeps hyphens)
+  const cleanRegexStr = title.toLowerCase().replace(/[^a-z0-9\s\-]/g, " ").replace(/\s+/g, " ").trim();
+  
+  // Clean tokens for Layer 2: Flexible Match (removes hyphens, handles plurals)
+  const rawTokens = title.toLowerCase().replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter(Boolean);
+  const titleTokens = new Set(rawTokens);
+  
+  for (const t of rawTokens) {
+    if (t.length > 3 && t.endsWith("ies")) titleTokens.add(t.slice(0, -3) + "y");
+    else if (t.length > 2 && t.endsWith("es")) titleTokens.add(t.slice(0, -2));
+    else if (t.length > 1 && t.endsWith("s")) titleTokens.add(t.slice(0, -1));
+  }
+
   const scores = {};
-  for (const { kw, cat, sub, w } of idx) {
-    const re = new RegExp("\\b" + kw.replace(/[-]/g, "\\-") + "\\b");
-    if (re.test(clean)) {
+  let matchFound = false;
+
+  for (const { kw, tokens, cat, sub, w } of idx) {
+    let isMatch = false;
+    
+    // LAYER 1: Original Exact Phrase Match (e.g., "t-shirt", "co-ord")
+    const exactRegex = new RegExp("\\b" + kw.replace(/[-]/g, "\\-") + "\\b");
+    if (exactRegex.test(cleanRegexStr)) {
+      isMatch = true;
+    } 
+    // LAYER 2: Unordered Token Match (e.g., "shirt for men", "hoodies")
+    else if (tokens.length > 0 && tokens.every(t => titleTokens.has(t))) {
+      isMatch = true;
+    }
+
+    if (isMatch) {
+      matchFound = true;
       const key = cat + "||" + sub;
       scores[key] = (scores[key] || 0) + w;
     }
   }
-  if (!Object.keys(scores).length) return { category: "Uncategorized", subcategory: "General" };
+
+  if (!matchFound) return { category: "Uncategorized", subcategory: "General" };
+
   const best = Object.entries(scores).sort((a, b) => b[1] - a[1])[0][0];
   const [category, subcategory] = best.split("||");
   return { category, subcategory };
 }
-
 // ── EXPORT — receives ONLY the rows it should write ──────────────────────────
 function buildAndDownload(rowsToExport, fileName, sheetTitle, includeFullTaxonomy) {
   const wb = XLSX.utils.book_new();
